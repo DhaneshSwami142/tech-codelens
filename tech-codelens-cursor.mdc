@@ -1,0 +1,752 @@
+---
+description: Automated backend code review and improvement workflow — auto-detects tech stack, runs code quality, security, performance analysis, proposes fixes as a reviewable changeset, and generates a senior-developer review report. The agent never commits — a human always reviews and commits.
+globs:
+alwaysApply: false
+---
+
+# Backend Code Review & Improvement Workflow
+
+> **Agentic Workflow** — Automatically detects the backend technology, then drives a full review cycle: code quality, security, performance, proposed fixes, and a senior-developer review report. **The agent never commits code** — all changes are staged for human review.
+
+---
+
+## How to Use This Workflow
+
+In Cursor's Agent chat, reference this rule and specify a path:
+
+```
+@tech-codelens review <path>
+```
+
+**Example invocations:**
+- `@tech-codelens review src/main/java/`
+- `@tech-codelens review app/`
+- `@tech-codelens review .`
+
+**Optional flags (append to your message):**
+| Flag | Effect |
+|------|--------|
+| `--security-only` | Run Phase 3 only |
+| `--performance-only` | Run Phase 4 only |
+| `--propose` | Generate proposed fix files in a staging directory (default: analysis + report only) |
+| `--severity critical` | Only surface Critical + High findings |
+| `--depth deep` | Expand analysis to all transitive dependencies |
+| `--report` | Write a `review-report.md` file at the end |
+
+---
+
+## Agent Execution Instructions
+
+When executing this workflow, the agent MUST:
+
+1. Read these instructions fully before starting any phase.
+2. **Run Phase 0 first** to auto-detect the technology stack before any analysis.
+3. Execute all phases in order unless a `--*-only` flag is present.
+4. After each phase, emit a **Phase Summary** block (format defined below).
+5. Track all findings in a structured **Finding Registry** (format defined below).
+6. **NEVER modify original source files directly.** All proposed changes go into a staging directory (Phase 5).
+7. **NEVER commit, push, or merge** any code. All changes are for human review only.
+8. Prefer targeted, surgical edits — never rewrite a file wholesale unless critically broken.
+
+---
+
+
+## Finding Registry Format
+
+Throughout execution, maintain a running list using this format:
+
+```
+[SEVERITY] [PHASE] [FILE:LINE] TITLE
+  Context: one-line description of what was found
+  Risk:    why this matters
+  Fix:     concrete recommendation or code snippet
+  Status:  OPEN | PROPOSED | ACCEPTED | DEFERRED
+```
+
+Severity levels: `CRITICAL` > `HIGH` > `MEDIUM` > `LOW` > `INFO`
+
+---
+
+## Phase Summary Format
+
+After each phase, output:
+
+```
+=== PHASE <N> SUMMARY ===
+Files scanned: N
+Findings: C critical, H high, M medium, L low, I info
+Time-sensitive: <list any CRITICAL findings that need immediate attention>
+=========================
+```
+
+---
+
+---
+
+# PHASE 0 — Technology Auto-Detection
+
+**Goal:** Automatically identify the backend technology stack, frameworks, package managers, and runtime before any analysis begins.
+
+## 0.1 Detection Steps
+
+Scan the `ROOT_PATH` and its parent directories for the following indicators. Check ALL of them and build a complete technology profile:
+
+### Build & Dependency Files (check which exist)
+- `pom.xml`, `build.gradle`, `build.gradle.kts` → Java (Maven/Gradle)
+- `requirements.txt`, `Pipfile`, `pyproject.toml`, `setup.py`, `setup.cfg` → Python
+- `*.csproj`, `*.sln`, `*.fsproj`, `global.json` → .NET
+- `package.json`, `yarn.lock`, `pnpm-lock.yaml` → Node.js
+- `go.mod`, `go.sum` → Go
+- `Gemfile`, `Gemfile.lock` → Ruby
+- `composer.json`, `composer.lock` → PHP
+- `Cargo.toml`, `Cargo.lock` → Rust
+
+### Framework Detection (scan source files for imports/annotations)
+- **Java**: Spring Boot (`@SpringBootApplication`), Micronaut, Quarkus, Jakarta EE
+- **Python**: Django (`django`), Flask (`flask`), FastAPI (`fastapi`), Tornado, Starlette
+- **.NET**: ASP.NET Core (`Microsoft.AspNetCore`), Minimal APIs, Blazor Server
+- **Node.js**: Express (`express`), Fastify (`fastify`), NestJS (`@nestjs`), Koa, Hapi
+- **Go**: Gin (`gin-gonic`), Echo (`labstack/echo`), Chi (`go-chi`), Fiber, stdlib `net/http`
+- **Ruby**: Rails (`rails`), Sinatra (`sinatra`), Hanami
+- **PHP**: Laravel (`laravel`), Symfony (`symfony`), Slim, CodeIgniter
+- **Rust**: Actix-web (`actix-web`), Axum (`axum`), Rocket (`rocket`), Warp
+
+### Database & ORM Detection
+- Scan config files and source imports for: PostgreSQL, MySQL, MongoDB, Redis, SQLite, MSSQL, Oracle, DynamoDB, Elasticsearch
+- Identify ORM/query builders: Hibernate, SQLAlchemy, Entity Framework, Sequelize, Mongoose, GORM, ActiveRecord, Eloquent, Diesel/SQLx
+
+### Additional Stack Components
+- Message queues: RabbitMQ, Kafka, SQS, Redis Pub/Sub, NATS
+- Caching: Redis, Memcached, in-memory caches
+- Auth libraries: JWT libraries, OAuth providers, session stores
+- API style: REST, GraphQL, gRPC, WebSocket
+
+## 0.2 Detection Output
+
+After scanning, emit a **Tech Profile** block:
+
+```
+=== TECH PROFILE ===
+Language:    <detected language>
+Runtime:     <version if detectable from config files>
+Framework:   <primary framework detected>
+Build Tool:  <maven/gradle/pip/npm/etc.>
+Database:    <detected DB(s)>
+ORM:         <detected ORM/query layer>
+Auth:        <detected auth mechanism>
+API Style:   <REST/GraphQL/gRPC/mixed>
+Other:       <queues, caches, notable libraries>
+Confidence:  <HIGH if multiple indicators match, MEDIUM if few, LOW if ambiguous>
+====================
+```
+
+## 0.3 Ambiguity Handling
+
+- If multiple languages are detected (e.g., monorepo), identify the **primary backend language** based on which has HTTP entry points, and note secondary languages.
+- If confidence is LOW, list what was found and ask the user to confirm before proceeding.
+- If no backend technology is detected at the given path, inform the user and suggest checking the path.
+
+## 0.4 Adapt All Subsequent Phases
+
+Once the tech is detected, the agent MUST dynamically apply the correct:
+- Entry point patterns (Phase 1)
+- Linting/analysis tools and commands (Phase 2)
+- Security grep patterns and vulnerability checks (Phase 3)
+- Performance anti-patterns and profiling tools (Phase 4)
+- Fix templates and code idioms (Phase 5)
+- Report context and terminology (Phase 6)
+
+All phases below are written in a tech-agnostic way. The agent is responsible for translating each check into the **specific patterns, tools, commands, and idioms** of the detected technology.
+
+---
+
+---
+
+# PHASE 1 — Discovery & Context Mapping
+
+**Goal:** Understand the codebase structure before touching anything.
+
+## 1.1 Entry Point Discovery
+
+Locate and document:
+- HTTP entry points (controllers, routers, handlers, endpoints) — use the framework-specific patterns for the detected tech
+- Background job schedulers / queue consumers
+- CLI entry points
+- WebSocket handlers (if present)
+
+## 1.2 Data Flow Mapping
+
+Trace the data lifecycle:
+- Where does user input enter the system?
+- How does it flow to persistence (DB, cache, file system)?
+- Where does it exit (response body, logs, external APIs)?
+- Are there any fan-out points (events, queues, webhooks)?
+
+## 1.3 Dependency Inventory
+
+Run the appropriate dependency audit command for the detected tech and flag:
+- Dependencies with known CVEs
+- Dependencies that are end-of-life
+- Dependencies that are pinned vs. floating
+
+## 1.4 Configuration & Secrets Scan
+
+Scan for:
+- Environment and config files (`.env`, framework-specific config files)
+- Hardcoded credentials, API keys, connection strings in source files
+- Config values that differ between environments (flag if only one env config exists)
+
+---
+
+# PHASE 2 — Code Quality Review
+
+**Goal:** Assess maintainability, readability, and structural soundness.
+
+## 2.1 Code Organization
+
+Check:
+- Are concerns separated (business logic, data access, HTTP handling)?
+- Is there a clear layered architecture or are responsibilities mixed?
+- Are there god classes / god functions (>300 lines)?
+- Is there duplicated logic that should be extracted?
+
+## 2.2 Error Handling
+
+Check for:
+- Bare/generic exception catching that swallows errors silently
+- Missing error responses on API endpoints (unhandled exceptions reaching clients)
+- Stack traces leaking to API responses (security risk — escalate to Phase 3)
+- Missing null/undefined/nil checks on external data
+
+## 2.3 Naming & Readability
+
+Check:
+- Consistent naming convention appropriate for the detected language
+- Cryptic abbreviations in public APIs or domain models
+- Boolean traps (methods that take `true/false` without clear semantics)
+
+## 2.4 Dead Code & Unused Dependencies
+
+Identify using the appropriate static analysis tools for the detected tech:
+- Unreachable code blocks
+- Commented-out code left in place
+- Unused imports / unused declared variables
+- Feature flags that are always on/off
+
+## 2.5 Complexity Metrics
+
+Flag any function/method where:
+- Cyclomatic complexity > 10
+- Function length > 50 lines
+- Nesting depth > 4 levels
+- Number of parameters > 5
+
+## 2.6 Logging & Observability
+
+Check:
+- Are errors logged with enough context (correlation IDs, user context)?
+- Are sensitive fields (passwords, tokens, PII) being logged?
+- Is log level used correctly (DEBUG/INFO/WARN/ERROR)?
+- Are there structured logs (JSON) or just string interpolation?
+
+---
+
+# PHASE 3 — Security Analysis
+
+**Goal:** Find exploitable vulnerabilities before attackers do.
+
+> OWASP Top 10 (2021) is the primary checklist. The agent must adapt all checks to the detected technology.
+
+## 3.1 Injection Vulnerabilities (A03:2021)
+
+### SQL Injection
+- Search for raw string concatenation into SQL queries using patterns appropriate to the detected language/ORM
+- Verify ORM usage: are raw queries used? Are they parameterized?
+- Check stored procedures for dynamic SQL
+
+### NoSQL Injection
+- If a NoSQL database is detected: check for user input in query objects without sanitization
+- MongoDB `$where`, Elasticsearch script injection, Redis user-controlled key names
+
+### Command Injection
+- Search for OS command execution functions in the detected language
+- Verify user input is never concatenated into shell commands
+- Prefer array-based process spawning over string-based
+
+### Other Injection Types
+- LDAP injection: user input in LDAP filter strings
+- Template injection: server-side template rendering with user-supplied templates
+- XPath injection: user input in XPath expressions
+
+## 3.2 Authentication & Authorization (A01, A07:2021)
+
+Check:
+- Are authentication checks applied consistently (middleware vs. per-route)?
+- Is JWT validated properly: algorithm pinned (`alg: none` attack), expiry checked, issuer verified?
+- Are passwords hashed with modern algorithms (bcrypt/argon2/scrypt) — NOT md5/sha1/sha256 alone?
+- Is there rate limiting on login, password reset, and OTP endpoints?
+- Are session tokens invalidated on logout?
+- Are there IDOR vulnerabilities: can user A access user B's data by changing an ID?
+- Check the detected framework's auth library for proper configuration
+
+## 3.3 Sensitive Data Exposure (A02:2021)
+
+Check:
+- Is PII/financial data encrypted at rest?
+- Are connections to databases and external services using TLS?
+- Are API responses filtering out internal fields?
+- Are credit card numbers, SSNs, or passwords ever logged?
+- Is HTTPS enforced (HSTS header)?
+
+## 3.4 Security Misconfiguration (A05:2021)
+
+Check:
+- Debug mode enabled in production configuration
+- Default credentials unchanged
+- CORS misconfiguration (`Access-Control-Allow-Origin: *` with credentials)
+- Error pages exposing stack traces in production
+- Unnecessary HTTP methods enabled
+- Missing security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`
+
+## 3.5 Vulnerable & Outdated Components (A06:2021)
+
+Use findings from Phase 1.3. Escalate any:
+- CVE with CVSS >= 7.0 to HIGH
+- CVE with CVSS >= 9.0 to CRITICAL
+- EOL framework/runtime versions to HIGH
+
+## 3.6 Cryptography Issues (A02:2021)
+
+Check:
+- Use of deprecated hash algorithms for password hashing (CRITICAL)
+- Use of broken/weak ciphers (HIGH)
+- Weak random number generators used for security tokens
+- Hard-coded encryption keys or IVs in source
+
+## 3.7 Language & Framework-Specific Security Checks
+
+Based on the detected tech, the agent MUST apply the known security anti-patterns specific to that language and framework. Examples include but are not limited to:
+- **Deserialization attacks**: unsafe deserialization of untrusted data (applies to virtually every language — use the language-specific unsafe deserializer list)
+- **XML External Entity (XXE)**: XML parsers with external entity processing enabled
+- **SSRF**: HTTP clients accepting user-supplied URLs without allowlisting
+- **Prototype pollution / mass assignment**: unfiltered user input merged into objects or models
+- **Eval-type functions**: dynamic code execution with user input
+- **Framework actuator/debug endpoints**: management endpoints exposed publicly
+- **Template injection**: user content rendered through server-side template engines
+
+The agent should research and apply the **full set of known vulnerability patterns** for whatever technology was detected in Phase 0.
+
+---
+
+# PHASE 4 — Performance Analysis
+
+**Goal:** Find bottlenecks, wasteful patterns, and scalability ceilings.
+
+## 4.1 Database Query Performance
+
+Check:
+- **N+1 queries**: loops that trigger a DB query per iteration — use the appropriate detection method for the detected ORM
+- **Missing indexes**: fields used in `WHERE`, `JOIN ON`, `ORDER BY` without indexes
+- **Full table scans**: queries without a selective `WHERE` clause on large tables
+- **SELECT ***: loading all columns when only a few are needed
+- **Unbounded queries**: no `LIMIT` on queries that could return millions of rows
+- **Connection pool sizing**: pool too small (starvation) or too large (DB overwhelmed)
+
+## 4.2 Caching Analysis
+
+Check:
+- Are expensive computed results cached?
+- Is the cache invalidation strategy correct?
+- Are cache keys namespaced to prevent collisions?
+- Is there a cache stampede / thundering herd risk on cold start?
+- Are large objects being cached unnecessarily?
+- Is session storage in-memory (not scalable past single instance)?
+
+## 4.3 Async & Concurrency
+
+Check:
+- **Blocking I/O in async context**: blocking calls on event loop or async threads
+- **Missing parallelism**: sequential awaits that could run concurrently
+- **Thread pool exhaustion**: too many blocking operations consuming the thread pool
+- **Race conditions**: shared mutable state modified concurrently without synchronization
+- **Deadlocks**: nested locks acquired in inconsistent order
+
+## 4.4 Memory & Resource Management
+
+Check:
+- **Memory leaks**: event listeners never removed, growing caches without eviction, circular references
+- **Large objects in memory**: files or large result sets loaded entirely instead of streamed
+- **Connection leaks**: DB connections, HTTP clients, file handles not closed in error paths
+- **Infinite retry loops**: retry without backoff + jitter, no max retry limit
+
+## 4.5 Algorithm & Data Structure Efficiency
+
+Flag:
+- O(n²) or worse algorithms where O(n log n) or O(n) is achievable
+- Linear search on large collections where a hash-based lookup would be O(1)
+- String concatenation in loops (use the language-appropriate builder/join)
+- Repeated computation inside loops that should be hoisted out
+
+## 4.6 HTTP & Network Performance
+
+Check:
+- Missing HTTP response caching headers (`Cache-Control`, `ETag`, `Last-Modified`)
+- No response compression (gzip / brotli) for large responses
+- Chatty APIs: multiple round trips where one batch call would suffice
+- Missing pagination on list endpoints
+- Synchronous calls to slow external services blocking the request thread
+
+## 4.7 Language-Specific Performance Patterns
+
+Based on the detected tech, the agent MUST check for known performance anti-patterns specific to that language and runtime. Examples include but are not limited to:
+- Inefficient string operations in loops
+- Incorrect use of lazy/eager loading in the detected ORM
+- Blocking the event loop or main thread with synchronous operations
+- Missing connection pooling or client reuse for HTTP/DB clients
+- Language-specific memory model issues (GIL, garbage collection tuning, etc.)
+
+The agent should research and apply the **full set of known performance pitfalls** for whatever technology was detected in Phase 0.
+
+---
+
+# PHASE 5 — Proposed Changes (Staging for Human Review)
+
+**Goal:** Generate a complete set of proposed fixes as a reviewable changeset. **The agent MUST NOT modify original source files.** All changes are written to a staging directory for a senior developer to review, approve, and commit manually.
+
+## 5.1 Staging Directory Structure
+
+Create a `.review-staging/` directory at the project root with this structure:
+
+```
+.review-staging/
+├── README.md                          # How to review and apply these changes
+├── CHANGES.md                         # Human-readable summary of every proposed change
+├── patches/                           # Unified diff patches grouped by phase
+│   ├── 01-quality-fixes.patch
+│   ├── 02-security-fixes.patch
+│   └── 03-performance-fixes.patch
+├── proposed/                          # Full proposed file versions (mirror of source tree)
+│   └── <mirrors original path>/
+│       └── <filename>                 # The modified file — ready to diff against original
+└── annotations/                       # Per-file review annotations
+    └── <filename>.review.md           # Inline explanation of what changed and why
+```
+
+## 5.2 Fix Prioritization Order
+
+Propose fixes in this order:
+
+1. **CRITICAL** — Security exploits, data loss risks (patch: `02-security-fixes.patch`)
+2. **HIGH** — Must fix before next release (patch: `02-security-fixes.patch` or `01-quality-fixes.patch`)
+3. **MEDIUM** — Should fix in current sprint (grouped by category)
+4. **LOW** — Tech debt improvements
+5. **INFO** — Optional enhancements, logged in `CHANGES.md` only
+
+## 5.3 For Each Proposed Fix
+
+The agent MUST:
+
+- [ ] Read the full function / class context (not just the flagged line)
+- [ ] Understand what invariants the code maintains
+- [ ] Confirm the fix doesn't break callers (grep for usages)
+- [ ] Write the **complete proposed file** to `.review-staging/proposed/<original-path>/<filename>`
+- [ ] Generate a **unified diff patch** between the original and proposed file
+- [ ] Write a **review annotation** in `.review-staging/annotations/<filename>.review.md` explaining:
+  - What was changed and on which lines
+  - Why it was changed (link to finding ID)
+  - Risk level of the change
+  - Whether it changes any public API contract (flag clearly for reviewer)
+  - Any dependencies or ordering concerns (e.g., "apply this before fix #7")
+- [ ] Update the Finding Registry entry to `Status: PROPOSED`
+
+## 5.4 Safe Proposed Fixes
+
+The following categories can be proposed without special warnings — use the **idiomatic code patterns** of the detected language:
+
+| Category | What to do |
+|----------|-----------|
+| Secret removal | Replace hardcoded credentials with environment variable reads |
+| Parameterized queries | Replace string-concatenated SQL with prepared statements |
+| Weak hashing | Replace deprecated hash algorithms with bcrypt/argon2 |
+| Missing null checks | Add guard clauses before dereference |
+| Swallowed exceptions | Add logging to empty catch/except blocks |
+| Unbounded queries | Add `LIMIT` clause to queries without one |
+| `SELECT *` | Replace with explicit column list where model is known |
+| Debug flags | Disable debug/development mode in production config |
+| Missing security headers | Add security middleware/headers appropriate for the detected framework |
+
+## 5.5 Changes Requiring Reviewer Attention
+
+Flag these prominently in `CHANGES.md` and in the annotation file with a `⚠️ REVIEWER ATTENTION REQUIRED` marker:
+
+- Changes to function/method signatures
+- Removal or renaming of public API endpoints
+- Changes to authentication/authorization logic
+- Database schema changes (new indexes, column changes)
+- Switching cryptographic algorithms (key migration needed)
+- Changes to session/token handling behavior
+- Modifications to retry or timeout policies
+- Any change that affects external integrations or contracts
+
+## 5.6 Staging README
+
+Generate `.review-staging/README.md` with:
+
+```markdown
+# Review Staging — Backend Code Review
+
+Generated: <date>
+Tech: <detected from Phase 0>
+Agent: Agentic Code Review Workflow v3.0
+
+## ⚠️ IMPORTANT
+These are PROPOSED changes only. Nothing has been committed.
+A senior developer must review, test, and commit these changes.
+
+## How to Review
+
+### Option 1: Review diffs
+Browse `patches/` for unified diffs grouped by category.
+
+### Option 2: Compare files
+Each file in `proposed/` mirrors the original source path.
+Use your diff tool:
+  diff -u <original-file> .review-staging/proposed/<path>/<file>
+
+### Option 3: Read annotations
+Each file in `annotations/` explains what changed, why, and the risk level.
+
+## How to Apply
+
+### Apply all patches:
+  git apply .review-staging/patches/02-security-fixes.patch
+  git apply .review-staging/patches/01-quality-fixes.patch
+  git apply .review-staging/patches/03-performance-fixes.patch
+
+### Apply selectively:
+Copy individual files from `proposed/` to their original locations after review.
+
+### After applying:
+1. Run the project's test suite
+2. Verify no regressions
+3. Commit with a meaningful message referencing this review
+4. Delete `.review-staging/`
+```
+
+---
+
+# PHASE 6 — Senior Developer Review Report
+
+**Goal:** Produce a comprehensive, structured report that gives a senior developer everything they need to understand the codebase health, review proposed changes, and make informed decisions — without re-running the analysis.
+
+## 6.1 Report File
+
+Write `review-report.md` in the project root. This report is **always generated** (not gated by a flag).
+
+## 6.2 Report Structure
+
+```markdown
+# Backend Code Review Report
+
+Generated: <date>
+Tech Stack: <full Tech Profile from Phase 0>
+Scope: <ROOT_PATH>
+Reviewed by: Agentic Code Review Workflow v3.0
+
+---
+
+## Executive Summary
+<3–5 sentences: overall codebase health, critical risk areas, top recommendations, and whether the codebase is safe to ship in its current state>
+
+## Tech Profile
+<full output from Phase 0 detection>
+
+---
+
+## Risk Matrix
+
+| Severity | Count | Status Breakdown | Top Finding |
+|----------|-------|-----------------|------------|
+| CRITICAL | N     | X proposed, Y open | ... |
+| HIGH     | N     | X proposed, Y open | ... |
+| MEDIUM   | N     | X proposed, Y open | ... |
+| LOW      | N     | X proposed, Y open | ... |
+| INFO     | N     | — | ... |
+
+---
+
+## Finding Registry (Complete)
+
+<Full finding registry with all entries from all phases, sorted by severity>
+
+| # | Severity | Phase | File:Line | Title | Status | Proposed Fix Location |
+|---|----------|-------|-----------|-------|--------|----------------------|
+| 1 | CRITICAL | 3    | auth.py:45 | SQL injection in login | PROPOSED | .review-staging/proposed/auth.py |
+| 2 | HIGH     | 3    | config.py:12 | Hardcoded DB password | PROPOSED | .review-staging/proposed/config.py |
+| ... | | | | | | |
+
+---
+
+## Critical & High Findings (Detail)
+
+### Finding #1 — <Title>
+- **Severity:** CRITICAL
+- **File:** <file:line>
+- **Phase:** <which phase found it>
+- **Description:** <what was found>
+- **Risk:** <why this matters, potential exploit scenario>
+- **Proposed Fix:** <summary of the fix>
+- **Proposed File:** `.review-staging/proposed/<path>`
+- **Reviewer Notes:** <any caveats, dependencies, or decisions the reviewer should make>
+
+<repeat for each CRITICAL and HIGH finding>
+
+---
+
+## Security Posture
+
+### OWASP Top 10 Coverage
+| OWASP Category | Status | Findings |
+|---------------|--------|----------|
+| A01: Broken Access Control | ✅ Reviewed | N findings |
+| A02: Cryptographic Failures | ✅ Reviewed | N findings |
+| A03: Injection | ✅ Reviewed | N findings |
+| ... | | |
+
+### CVE Summary
+<list of CVEs found in dependencies with CVSS scores>
+
+### Auth/Authz Assessment
+<summary of authentication and authorization review>
+
+---
+
+## Performance Hotspots
+
+| Rank | Finding | File | Estimated Impact | Status |
+|------|---------|------|-----------------|--------|
+| 1 | N+1 query in order loading | orders.py:89 | High — scales O(n) DB calls | PROPOSED |
+| 2 | ... | | | |
+
+---
+
+## Code Quality Score
+
+**Overall: <Needs Work | Fair | Good | Excellent>**
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| Architecture & Separation | <score> | <notes> |
+| Error Handling | <score> | <notes> |
+| Naming & Readability | <score> | <notes> |
+| Dead Code & Cleanliness | <score> | <notes> |
+| Complexity | <score> | <notes> |
+| Logging & Observability | <score> | <notes> |
+
+---
+
+## Proposed Changes Summary
+
+Total files with proposed changes: N
+Total patches generated: N
+
+### Changes by Category
+| Category | Files Changed | Risk Level |
+|----------|--------------|------------|
+| Security fixes | N | 🔴 High — review carefully |
+| Quality fixes | N | 🟡 Medium |
+| Performance fixes | N | 🟡 Medium |
+
+### Changes Requiring Special Attention
+<list all items flagged with ⚠️ REVIEWER ATTENTION REQUIRED in Phase 5>
+
+---
+
+## Recommended Action Plan
+
+### 🔴 Immediate (before next deploy)
+- <CRITICAL findings that must be addressed>
+
+### 🟡 Short-term (next 1–2 sprints)
+- <HIGH findings and important improvements>
+
+### 🟢 Long-term (tech debt backlog)
+- <MEDIUM/LOW findings and structural improvements>
+
+---
+
+## Manual Actions Required
+
+<List any findings that the agent could NOT propose a fix for and that require human action outside the codebase>
+- Infrastructure configuration changes
+- Secrets rotation
+- Dependency major version upgrades
+- Database migrations
+- Third-party service configuration
+
+---
+
+## How to Apply Proposed Changes
+
+See `.review-staging/README.md` for detailed instructions.
+
+Quick start:
+1. Review patches in `.review-staging/patches/`
+2. Read annotations in `.review-staging/annotations/`
+3. Apply: `git apply .review-staging/patches/<patch-file>`
+4. Test thoroughly
+5. Commit and delete `.review-staging/`
+```
+
+---
+
+# PHASE 7 — Final Validation
+
+**Goal:** Verify the workflow output is complete, consistent, and ready for senior developer review.
+
+## 7.1 Self-Validation Checks
+
+The agent MUST verify:
+
+- [ ] Finding Registry is complete with Status for every finding
+- [ ] All CRITICAL findings have either `PROPOSED` changes or a documented reason why a fix couldn't be proposed
+- [ ] Every `PROPOSED` finding has a corresponding file in `.review-staging/proposed/`
+- [ ] Every `PROPOSED` finding has a corresponding annotation in `.review-staging/annotations/`
+- [ ] Patches in `.review-staging/patches/` are valid unified diffs
+- [ ] `.review-staging/README.md` exists with apply instructions
+- [ ] `review-report.md` exists in the project root
+- [ ] No original source files were modified by the agent
+- [ ] No git commits were made by the agent
+
+## 7.2 Consistency Checks
+
+- [ ] Finding count in the report matches the Finding Registry
+- [ ] Every file listed in `CHANGES.md` exists in `proposed/`
+- [ ] Risk matrix totals match actual finding counts
+- [ ] All cross-references between report sections are consistent
+
+## 7.3 Final Output to User
+
+After all phases complete, output:
+
+```
+=== WORKFLOW COMPLETE ===
+Tech detected:       <language + framework>
+Total findings:      N (C critical, H high, M medium, L low, I info)
+Proposed changes:    N files
+Report:              review-report.md
+Staging directory:   .review-staging/
+
+⚠️  NEXT STEPS FOR SENIOR DEVELOPER:
+1. Read review-report.md for the full analysis
+2. Review proposed changes in .review-staging/
+3. Apply approved patches with: git apply .review-staging/patches/<file>
+4. Run tests to verify no regressions
+5. Commit approved changes
+6. Delete .review-staging/ after done
+=============================
+```
+
+---
+
+*Workflow version: 3.0 — Auto-detects technology. Agent never commits — all changes staged for human review. Cursor Agent edition.*
